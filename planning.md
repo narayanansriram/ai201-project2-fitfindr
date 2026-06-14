@@ -16,6 +16,7 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
+Searches listings dataset based on input parameters and returns items that match the parameters that are passed in. 
 
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
@@ -25,27 +26,31 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **What it returns:**
 <!-- Describe the return value — what fields does a result contain? -->
+A list of matching listing dictionaries. Each item contains: title (str), description (str), size (str), price (float), and category (str). If no matches are found, returns an empty list [].
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if no listings match? -->
-
+The agent checks if the returned list is empty. If it is, it sets an error message in session state ("[ERROR] No listings found for your query.") and returns early — skipping suggest_outfit and create_fit_card. The user is informed and optionally asked to broaden their search (e.g., remove size or raise price limit).
 ---
 
 ### Tool 2: suggest_outfit
 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
+Given a specific thrifted item and the user's existing wardrobe, uses an LLM to suggest one or more complete outfit combinations that incorporate the new item.
 
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
-- `new_item` (dict): ...
-- `wardrobe` (dict): ...
+- `new_item` (dict): The listing item selected from search_listings results — contains title, description, size, price, category.
+- `wardrobe` (dict): The user's existing wardrobe, with a key "items" mapping to a list of clothing item strings (e.g., {"items": ["baggy jeans", "chunky sneakers", "white crop top"]}).
 
 **What it returns:**
 <!-- Describe the return value -->
+A string describing one or more outfit combinations, e.g.: "Pair the vintage graphic tee with your baggy jeans and chunky sneakers for a relaxed streetwear look. Add a flannel overshirt if it's chilly."
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if the wardrobe is empty or no outfit can be suggested? -->
+If wardrobe["items"] is empty or the LLM returns a blank response, the agent returns a fallback message: "Your wardrobe is empty — we can still show you the item, but can't suggest a full outfit. Try adding some basics like jeans or sneakers." It then proceeds to create_fit_card using only the new item.
 
 ---
 
@@ -53,6 +58,7 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
+Calls the LLM to generate a short, punchy, shareable outfit caption — the kind of thing someone would post on Instagram — based on the suggested outfit and the new item.
 
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
@@ -60,10 +66,11 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **What it returns:**
 <!-- Describe the return value -->
+A string: a 1–3 sentence shareable caption, e.g.: "thrifted chaos, intentional vibes 🧢 vintage tee + baggy jeans + chunky sneakers = the look. found it for $18 and i'm never taking it off."
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if the outfit data is incomplete? -->
-
+If outfit is empty or the LLM returns nothing, the tool returns the error string: "[ERROR] Could not generate a fit card — outfit description was missing or incomplete." The agent surfaces this to the user without crashing.
 ---
 
 ### Additional Tools (if any)
@@ -76,6 +83,19 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **How does your agent decide which tool to call next?**
 <!-- Describe the logic your planning loop uses. What does it look at? What conditions change its behavior? How does it know when it's done? -->
+The agent uses the following conditional logic:
+
+Parse the user's query to extract description, size, and max_price. Call search_listings with these values.
+Check results: If results == [], set session["error"] = "[ERROR] No listings found." and return early — do not call the remaining tools. Inform the user and suggest relaxing filters.
+If results are found, set session["selected_item"] = results[0] (the best match).
+Call suggest_outfit(session["selected_item"], session["wardrobe"]).
+Check outfit: If the returned string is empty or a fallback message, set session["outfit_suggestion"] to that fallback and proceed anyway (fit card can still run with just the new item).
+Set session["outfit_suggestion"] to the returned string.
+Call create_fit_card(session["outfit_suggestion"], session["selected_item"]).
+Set session["fit_card"] to the returned caption.
+Return all three outputs to the user.
+
+The loop is conditional — it only advances if the previous tool returned usable output. It never calls all three tools unconditionally.
 
 ---
 
@@ -83,6 +103,19 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **How does information from one tool get passed to the next?**
 <!-- Describe how your agent stores and accesses state within a session. What data is tracked? How is it passed between tool calls? -->
+
+A single session dictionary is initialized at the start of each interaction and passed through each step:
+
+| Key | Set by | Used by |
+|-----|--------|---------|
+| `session["query"]` | User input | Planning loop |
+| `session["selected_item"]` | `search_listings` result | `suggest_outfit`, `create_fit_card` |
+| `session["wardrobe"]` | User input | `suggest_outfit` |
+| `session["outfit_suggestion"]` | `suggest_outfit` result | `create_fit_card` |
+| `session["fit_card"]` | `create_fit_card` result | Final output |
+| `session["error"]` | Any tool failure | Planning loop (early exit) |
+
+No tool re-prompts the user for information already in session state. `selected_item` from step 1 flows directly into steps 2 and 3 without the user re-entering it.
 
 ---
 
@@ -92,22 +125,34 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | |
-| suggest_outfit | Wardrobe is empty | |
-| create_fit_card | Outfit input is missing or incomplete | |
+| search_listings | No results match the query | Sets `session["error"]`, returns early, tells user: "No listings found for '[query]'. Try a broader description or higher price limit." |
+| suggest_outfit | Wardrobe is empty (`wardrobe["items"] == []`) | Returns fallback string: "Your wardrobe is empty — showing the item only. Add items like jeans or sneakers for outfit suggestions." Proceeds to `create_fit_card`. |
+| create_fit_card | `outfit` is empty or missing | Returns error string: "[ERROR] Could not generate a fit card — outfit description was missing." Displays error to user instead of crashing. |
 
 ---
 
 ## Architecture
 
-<!-- Draw a diagram of your agent showing how the components connect:
-     User input → Planning Loop → Tools (search_listings, suggest_outfit, create_fit_card)
-                                                                          ↕
-                                                                   State / Session
-     Show what triggers each tool, how state flows between them, and where error paths branch off.
-     ASCII art, a Mermaid diagram (https://mermaid.js.org/syntax/flowchart.html), or an embedded
-     sketch are all fine. You'll share this diagram with an AI tool when asking it to implement
-     the planning loop and each individual tool. -->
+```mermaid
+flowchart TD
+    A[User Query] --> B[Planning Loop]
+    B --> C[search_listings\ndescription, size, max_price]
+    C -->|results == []| D[ERROR: No listings found\nReturn early to user]
+    C -->|results found| E[session: selected_item = results 0]
+    E --> F[suggest_outfit\nselected_item, wardrobe]
+    F -->|wardrobe empty| G[Fallback: item-only suggestion]
+    G --> H[session: outfit_suggestion = result]
+    F -->|outfit returned| H
+    H --> I[create_fit_card\noutfit_suggestion, selected_item]
+    I -->|outfit missing| J[ERROR: Fit card failed\nReturn error string to user]
+    I -->|success| K[session: fit_card = caption]
+    K --> L[Return to user:\nselected_item + outfit_suggestion + fit_card]
+
+    B -.reads/writes.-> M[(session state)]
+    C -.reads/writes.-> M
+    F -.reads/writes.-> M
+    I -.reads/writes.-> M
+```
 
 ---
 
