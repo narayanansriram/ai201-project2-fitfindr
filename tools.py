@@ -69,8 +69,30 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    listings = load_listings()
+
+    # Price and size filters
+    if max_price is not None:
+        listings = [l for l in listings if l["price"] <= max_price]
+    if size is not None:
+        size_lower = size.lower()
+        listings = [l for l in listings if size_lower in l["size"].lower()]
+
+    # Keyword scoring: count matches across title, description, and style_tags
+    keywords = [w.lower() for w in description.split()]
+
+    def score(listing):
+        text = " ".join([
+            listing["title"],
+            listing["description"],
+            " ".join(listing.get("style_tags", [])),
+        ]).lower()
+        return sum(1 for kw in keywords if kw in text)
+
+    scored = [(score(l), l) for l in listings]
+    scored = [(s, l) for s, l in scored if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [l for _, l in scored]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -100,8 +122,41 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    items = wardrobe.get("items", [])
+
+    if not items:
+        return (
+            "Your wardrobe is empty — we can still show you the item, but can't "
+            "suggest a full outfit. Try adding some basics like jeans or sneakers."
+        )
+
+    item_names = ", ".join(
+        i["name"] if isinstance(i, dict) else str(i) for i in items
+    )
+
+    prompt = (
+        f"The user just found a thrifted item: '{new_item['title']}' — "
+        f"{new_item['description']} (size {new_item['size']}, ${new_item['price']}, "
+        f"category: {new_item['category']}).\n\n"
+        f"Their current wardrobe includes: {item_names}.\n\n"
+        "Suggest 1–2 complete outfit combinations that incorporate the new item "
+        "and specific pieces from their wardrobe. Be concrete — name the exact "
+        "pieces and describe how to wear them together."
+    )
+
+    client = _get_groq_client()
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+    result = response.choices[0].message.content.strip()
+    if not result:
+        return (
+            "Your wardrobe is empty — we can still show you the item, but can't "
+            "suggest a full outfit. Try adding some basics like jeans or sneakers."
+        )
+    return result
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -133,5 +188,26 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "[ERROR] Could not generate a fit card — outfit description was missing or incomplete."
+
+    prompt = (
+        f"Write a short, punchy Instagram caption (1–3 sentences) for this outfit:\n\n"
+        f"{outfit}\n\n"
+        f"The thrifted piece is: '{new_item['title']}', found for ${new_item['price']} "
+        f"on {new_item.get('platform', 'a thrift app')}.\n\n"
+        "Rules: sound like a real OOTD post, not a product description. "
+        "Mention the item name, price, and platform naturally (once each). "
+        "Keep it casual, specific, and fun."
+    )
+
+    client = _get_groq_client()
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.9,
+    )
+    result = response.choices[0].message.content.strip()
+    if not result:
+        return "[ERROR] Could not generate a fit card — outfit description was missing or incomplete."
+    return result
