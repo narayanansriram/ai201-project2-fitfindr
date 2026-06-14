@@ -112,7 +112,9 @@ A single session dictionary is initialized at the start of each interaction and 
 | Key | Set by | Used by |
 |-----|--------|---------|
 | `session["query"]` | User input | Planning loop |
-| `session["selected_item"]` | `search_listings` result | `suggest_outfit`, `create_fit_card` |
+| `session["parsed"]` | Planning loop (query parse) | `search_listings` call |
+| `session["search_results"]` | `search_listings` result | Planning loop (selects top item) |
+| `session["selected_item"]` | Planning loop (`search_results[0]`) | `suggest_outfit`, `create_fit_card` |
 | `session["wardrobe"]` | User input | `suggest_outfit` |
 | `session["outfit_suggestion"]` | `suggest_outfit` result | `create_fit_card` |
 | `session["fit_card"]` | `create_fit_card` result | Final output |
