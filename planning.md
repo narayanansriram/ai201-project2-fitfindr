@@ -112,9 +112,7 @@ A single session dictionary is initialized at the start of each interaction and 
 | Key | Set by | Used by |
 |-----|--------|---------|
 | `session["query"]` | User input | Planning loop |
-| `session["parsed"]` | Planning loop (query parse) | `search_listings` call |
-| `session["search_results"]` | `search_listings` result | Planning loop (selects top item) |
-| `session["selected_item"]` | Planning loop (`search_results[0]`) | `suggest_outfit`, `create_fit_card` |
+| `session["selected_item"]` | `search_listings` result | `suggest_outfit`, `create_fit_card` |
 | `session["wardrobe"]` | User input | `suggest_outfit` |
 | `session["outfit_suggestion"]` | `suggest_outfit` result | `create_fit_card` |
 | `session["fit_card"]` | `create_fit_card` result | Final output |
@@ -291,15 +289,14 @@ The tool scans the mock listings dataset for items whose description contains
 
 ```python
 [
-  {"title": "Faded Band Tee", "description": "vintage graphic band tee, slightly
-   oversized", "size": "M", "price": 18.00, "category": "tops"},
-  {"title": "90s Skate Tee", "description": "vintage graphic skate tee, boxy fit",
-   "size": "L", "price": 25.00, "category": "tops"}
+  {"title": "Y2K Baby Tee — Butterfly Print", "description": "Super cute early 2000s baby tee with butterfly graphic. Fitted crop length. Tag says medium but fits like a small.", "size": "S/M", "price": 18.00, "category": "tops", "platform": "depop"},
+  {"title": "Graphic Tee — 2003 Tour Bootleg Style", "description": "Vintage-style bootleg tee with faded graphic. Slightly boxy fit. 100% cotton, soft and worn-in.", "size": "L", "price": 24.00, "category": "tops", "platform": "depop"},
+  {"title": "Vintage Band Tee — Faded Grey", "description": "Faded grey band-style tee with distressed graphic. Crew neck. Fits boxy. Well-loved but no holes or major damage.", "size": "L", "price": 19.00, "category": "tops", "platform": "depop"}
 ]
 ```
 
 The planning loop checks: `results != []` → proceed.
-Sets `session["selected_item"] = results[0]` (the Faded Band Tee at $18).
+Sets `session["selected_item"] = results[0]` (the Y2K Baby Tee at $18).
 
 ---
 
@@ -307,18 +304,24 @@ Sets `session["selected_item"] = results[0]` (the Faded Band Tee at $18).
 <!-- What happens next? What was returned from step 1? What tool is called now? -->
 
 The planning loop calls:
-`suggest_outfit(new_item=session["selected_item"], wardrobe={"items": ["baggy jeans",
-"chunky sneakers"]})`
+`suggest_outfit(new_item=session["selected_item"], wardrobe=get_example_wardrobe())`
 
-The tool builds a prompt: *"The user just found a 'Faded Band Tee' — a vintage
-graphic band tee, slightly oversized. Their current wardrobe includes: baggy jeans,
-chunky sneakers. Suggest one complete outfit using the new item and pieces from
-their wardrobe."*
+The tool builds a prompt: *"The user just found a 'Y2K Baby Tee — Butterfly Print' — a
+super cute early 2000s baby tee with butterfly graphic, fitted crop length, size S/M, $18,
+on depop. Their current wardrobe includes: Baggy straight-leg jeans, Chunky white sneakers,
+Vintage black denim jacket, Wide-leg khaki trousers, Black combat boots, and more. Suggest
+1–2 complete outfit combinations using the new item and named pieces from their wardrobe."*
 
-The LLM returns:
-`"Wear the faded band tee slightly tucked into your baggy jeans, cuffed once at
-the ankle. Finish with your chunky sneakers. The oversized fit of the tee balances
-the volume of the jeans without looking sloppy."`
+The LLM returns (actual output from a live run):
+`"With the new 'Y2K Baby Tee — Butterfly Print', here are two complete outfit combinations:
+
+1. Casual Day Outfit: Pair the tee with the Baggy straight-leg jeans and Chunky white
+sneakers. The fitted crop length creates a cute contrast with the loose fit of the jeans.
+Add the Vintage black denim jacket on top for a cool, layered look.
+
+2. Laid-Back Evening Outfit: Combine the tee with the Wide-leg khaki trousers and Black
+combat boots. Top it off with the Black cropped zip hoodie for a laid-back evening look.
+Add the Brown leather belt to define your waist."`
 
 The planning loop checks: response is non-empty → proceed.
 Sets `session["outfit_suggestion"]` to the returned string.
@@ -333,12 +336,13 @@ The planning loop calls:
 new_item=session["selected_item"])`
 
 The tool builds a prompt: *"Write a short, punchy Instagram caption for this outfit:
-[outfit_suggestion]. The new thrifted piece is a Faded Band Tee, found for $18.
-Make it sound like something worth sharing — not a product description."*
+[outfit_suggestion]. The new thrifted piece is a Y2K Baby Tee — Butterfly Print, found
+for $18 on Depop. Make it sound like something worth sharing — not a product description."*
 
-The LLM returns:
-`"$18 and it goes with literally everything 🤝 vintage band tee + baggy jeans +
-chunky sneakers. thrift math just hits different."`
+The LLM returns (actual output from a live run):
+`"Just scored the cutest 'Y2K Baby Tee — Butterfly Print' for $18 on Depop and I'm
+obsessed. Paired it with my fave baggy jeans and chunky sneakers for a casual day out,
+and I'm feeling like a total vibe."`
 
 Sets `session["fit_card"]` to the returned caption.
 
@@ -347,16 +351,29 @@ Sets `session["fit_card"]` to the returned caption.
 **Final output to user:**
 <!-- What does the user actually see at the end? -->
 
+Note: LLM outputs vary across runs due to temperature settings. The example below reflects
+actual output from a live run of the implemented agent.
+
 ```
-🛍  Found: "Faded Band Tee" — Size M — $18.00
-    "vintage graphic band tee, slightly oversized"
+🛍️  TOP LISTING
+Y2K Baby Tee — Butterfly Print
+Size: S/M  |  $18.00  |  Depop  |  Condition: excellent
+"Super cute early 2000s baby tee with butterfly graphic. Fitted crop length.
+Tag says medium but fits like a small."
 
-👗  How to wear it:
-    Wear the faded band tee slightly tucked into your baggy jeans, cuffed once
-    at the ankle. Finish with your chunky sneakers. The oversized fit of the tee
-    balances the volume of the jeans without looking sloppy.
+👗  OUTFIT IDEA
+With the new 'Y2K Baby Tee — Butterfly Print', here are two complete outfit combinations:
 
-✨  Fit card:
-    $18 and it goes with literally everything 🤝 vintage band tee + baggy jeans
-    + chunky sneakers. thrift math just hits different.
+1. Casual Day Outfit: Pair the tee with the Baggy straight-leg jeans and Chunky white
+sneakers. The fitted crop length creates a cute contrast with the loose fit of the jeans.
+Add the Vintage black denim jacket on top for a cool, layered look.
+
+2. Laid-Back Evening Outfit: Combine the tee with the Wide-leg khaki trousers and Black
+combat boots. Top it off with the Black cropped zip hoodie for a laid-back evening look.
+Add the Brown leather belt to define your waist.
+
+✨  FIT CARD
+Just scored the cutest 'Y2K Baby Tee — Butterfly Print' for $18 on Depop and I'm
+obsessed. Paired it with my fave baggy jeans and chunky sneakers for a casual day out,
+and I'm feeling like a total vibe.
 ```

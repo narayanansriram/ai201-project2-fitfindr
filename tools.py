@@ -13,11 +13,19 @@ Tools:
 """
 
 import os
+import re
 
 from dotenv import load_dotenv
 from groq import Groq
 
 from utils.data_loader import load_listings
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove bold/italic markdown markers so plain-text outputs stay clean."""
+    text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
+    text = re.sub(r'_{1,3}(.*?)_{1,3}', r'\1', text)
+    return text
 
 load_dotenv()
 
@@ -150,7 +158,7 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
     )
-    result = response.choices[0].message.content.strip()
+    result = _strip_markdown(response.choices[0].message.content.strip())
     if not result:
         return (
             "Your wardrobe is empty — we can still show you the item, but can't "
@@ -207,7 +215,7 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         messages=[{"role": "user", "content": prompt}],
         temperature=0.9,
     )
-    result = response.choices[0].message.content.strip()
+    result = _strip_markdown(response.choices[0].message.content.strip())
     if not result:
         return "[ERROR] Could not generate a fit card — outfit description was missing or incomplete."
     return result

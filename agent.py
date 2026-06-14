@@ -18,6 +18,8 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+
 from tools import search_listings, suggest_outfit, create_fit_card
 
 
@@ -92,32 +94,154 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: initialize session
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    print(f"\n{'─'*60}")
+    print(f"  USER QUERY: \"{query}\"")
+    print(f"{'─'*60}")
+
+    # Step 2: parse query — extract size, price, and item description
+    size_match = re.search(r'\bsize\s+([A-Za-z0-9/]+)', query, re.IGNORECASE)
+    price_match = re.search(r'(?:under\s+)?\$(\d+(?:\.\d+)?)', query, re.IGNORECASE)
+    size = size_match.group(1) if size_match else None
+    max_price = float(price_match.group(1)) if price_match else None
+
+    # Use only the first sentence so wardrobe context doesn't pollute the search
+    first_sentence = re.split(r'[.!?]', query)[0]
+
+    # Strip filler openers, size/price tokens, then clean whitespace
+    description = re.sub(
+        r"^(i'?m?\s+)?(looking for|searching for|find me|want|need)\s+(a\s+|an\s+)?",
+        '', first_sentence, flags=re.IGNORECASE
+    )
+    description = re.sub(r'\bsize\s+[A-Za-z0-9/]+', '', description, flags=re.IGNORECASE)
+    description = re.sub(r'under\s+\$?\d+(?:\.\d+)?', '', description, flags=re.IGNORECASE)
+    description = re.sub(r'\$\d+(?:\.\d+)?', '', description)
+    description = re.sub(r'\b(in|a|an|the)\b', '', description, flags=re.IGNORECASE)
+    description = ' '.join(description.split())
+
+    session["parsed"] = {"description": description, "size": size, "max_price": max_price}
+
+    print(f"\n  [PLANNING LOOP] Parsed query:")
+    print(f"    description : \"{description}\"")
+    print(f"    size        : {size}")
+    print(f"    max_price   : {max_price}")
+
+    # Step 3: search listings, exit early if nothing found
+    print(f"\n  [TOOL 1] Calling search_listings(description=\"{description}\", size={size}, max_price={max_price})")
+    results = search_listings(description, size=size, max_price=max_price)
+    session["search_results"] = results
+
+    if not results:
+        session["error"] = (
+            f"No listings found for '{description}'. "
+            "Try a broader description or higher price limit."
+        )
+        print(f"\n  [PLANNING LOOP] search_listings returned 0 results → early exit")
+        print(f"  [ERROR] {session['error']}")
+        return session
+
+    print(f"  [PLANNING LOOP] search_listings returned {len(results)} result(s) → selecting top match")
+
+    # Step 4: select top result
+    session["selected_item"] = results[0]
+    item = session["selected_item"]
+    print(f"\n  session[\"selected_item\"] set to:")
+    print(f"    title : {item['title']}")
+    print(f"    size  : {item['size']}  |  price : ${item['price']:.2f}  |  platform : {item.get('platform','')}")
+    print(f"    desc  : {item['description']}")
+
+    # Step 5: suggest outfit (proceeds even on fallback)
+    wardrobe_count = len(session["wardrobe"].get("items", []))
+    print(f"\n  [TOOL 2] Calling suggest_outfit(new_item=session[\"selected_item\"], wardrobe={wardrobe_count} item(s))")
+    session["outfit_suggestion"] = suggest_outfit(session["selected_item"], session["wardrobe"])
+    print(f"  [PLANNING LOOP] suggest_outfit returned → storing in session[\"outfit_suggestion\"]")
+    print(f"\n  session[\"outfit_suggestion\"]:")
+    for line in session["outfit_suggestion"].splitlines():
+        print(f"    {line}")
+
+    # Step 6: create fit card
+    print(f"\n  [TOOL 3] Calling create_fit_card(outfit=session[\"outfit_suggestion\"], new_item=session[\"selected_item\"])")
+    session["fit_card"] = create_fit_card(session["outfit_suggestion"], session["selected_item"])
+    print(f"  [PLANNING LOOP] create_fit_card returned → storing in session[\"fit_card\"]")
+    print(f"\n  session[\"fit_card\"]:")
+    print(f"    {session['fit_card']}")
+
+    print(f"\n  [PLANNING LOOP] Done. session[\"error\"] = {session['error']}")
+    print(f"{'─'*60}\n")
+
+    # Step 7: return completed session
     return session
 
 
-# ── CLI test ──────────────────────────────────────────────────────────────────
+# ── CLI demo ──────────────────────────────────────────────────────────────────
+
+def _print_session(session):
+    sep = "─" * 60
+    if session["error"]:
+        print(f"  ❌  {session['error']}")
+        return
+
+    item = session["selected_item"]
+    print(f"  Query parsed as:")
+    print(f"    description : {session['parsed']['description']}")
+    print(f"    size        : {session['parsed']['size']}")
+    print(f"    max_price   : {session['parsed']['max_price']}")
+    print()
+    print(sep)
+    print("  🛍️  TOP LISTING")
+    print(sep)
+    print(f"  {item['title']}")
+    print(f"  Size: {item['size']}  |  ${item['price']:.2f}  |  {item.get('platform','').title()}  |  Condition: {item.get('condition','')}")
+    print(f"  \"{item['description']}\"")
+    print()
+    print(sep)
+    print("  👗  OUTFIT IDEA")
+    print(sep)
+    for line in session["outfit_suggestion"].splitlines():
+        print(f"  {line}")
+    print()
+    print(sep)
+    print("  ✨  FIT CARD")
+    print(sep)
+    print(f"  {session['fit_card']}")
+    print()
+    print(f"  [STATE CHECK]")
+    print(f"  session['selected_item'] title     : {session['selected_item']['title']}")
+    print(f"  session['outfit_suggestion'] first 60: {session['outfit_suggestion'][:60]}...")
+
 
 if __name__ == "__main__":
     from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
 
-    print("=== Happy path: graphic tee ===\n")
+    DIVIDER = "=" * 60
+
+    print(DIVIDER)
+    print("  DEMO 1 — full query with wardrobe context (happy path)")
+    print(DIVIDER)
     session = run_agent(
-        query="looking for a vintage graphic tee under $30",
+        query="I'm looking for a vintage graphic tee under $30. I mostly wear baggy jeans and chunky sneakers. What's out there and how would I style it?",
         wardrobe=get_example_wardrobe(),
     )
-    if session["error"]:
-        print(f"Error: {session['error']}")
-    else:
-        print(f"Found: {session['selected_item']['title']}")
-        print(f"\nOutfit: {session['outfit_suggestion']}")
-        print(f"\nFit card: {session['fit_card']}")
+    _print_session(session)
 
-    print("\n\n=== No-results path ===\n")
+    print()
+    print(DIVIDER)
+    print("  DEMO 2 — empty wardrobe (fallback path)")
+    print(DIVIDER)
     session2 = run_agent(
+        query="vintage graphic tee under $30",
+        wardrobe=get_empty_wardrobe(),
+    )
+    _print_session(session2)
+
+    print()
+    print(DIVIDER)
+    print("  DEMO 3 — no results (early exit path)")
+    print(DIVIDER)
+    session3 = run_agent(
         query="designer ballgown size XXS under $5",
         wardrobe=get_example_wardrobe(),
     )
-    print(f"Error message: {session2['error']}")
+    _print_session(session3)
